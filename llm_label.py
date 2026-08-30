@@ -26,37 +26,43 @@ EMOTIONS = [
     "疑惑", "兴奋", "无奈", "担心", "惊讶", "哭泣", "心动", "难为情", "自信", "调皮", "平静"
 ]
 
-SYSTEM_PROMPT = """你是情绪分类专家。对每条中文短句，从以下19种情绪中选择最贴切的一个：
+SYSTEM_PROMPT = """只输出编号和情绪词，格式：编号. 情绪词
+禁止输出分析、解释、额外文字。
 
-高兴、厌恶、害羞、害怕、生气、认真、紧张、慌张、疑惑、兴奋、无奈、担心、惊讶、哭泣、心动、难为情、自信、调皮、平静
+示例输入：
+1. 今天升职加薪了！
+2. 这只虫子太恶心了
+3. 呵呵
 
-注意：只能从上面19个词中选一个，不能用其他词。
-
-输出格式（每条一行）：
+示例输出：
 1. 高兴
 2. 厌恶
-3. 害羞
-..."""
+3. 平静
 
-def label_with_api(texts, provider, api_key, model=None, batch_size=20):
-    """使用 LLM API 标注"""
+情绪词列表：高兴、厌恶、害羞、害怕、生气、认真、紧张、慌张、疑惑、兴奋、无奈、担心、惊讶、哭泣、心动、难为情、自信、调皮、平静"""
+
+def label_with_api(texts, provider, api_key, model=None, batch_size=10):
+    """使用 LLM API 标注（批量模式）"""
     
     endpoints = {
         "deepseek": "https://api.deepseek.com/v1/chat/completions",
         "openai": "https://api.openai.com/v1/chat/completions",
         "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "longcat": "https://api.longcat.chat/openai/v1/chat/completions",
     }
     
     headers_map = {
         "deepseek": {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         "openai": {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         "dashscope": {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        "longcat": {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
     }
     
     default_models = {
         "deepseek": "deepseek-chat",
         "openai": "gpt-4o-mini",
         "dashscope": "qwen-turbo",
+        "longcat": "LongCat-2.0",
     }
     
     url = endpoints[provider]
@@ -67,66 +73,77 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i+batch_size]
         
-        # 逐条发送（带思考的逐条分析更准确）
-        for j, text in enumerate(batch):
-            user_msg = f"输入：{text}\n输出："
+        # 构建批量提示：多条文本一起发送
+        numbered = "\n".join([f"{j+1}. {t}" for j, t in enumerate(batch)])
+        user_msg = f"对以下文本逐条选择情绪，每行输出'编号. 情绪'：\n{numbered}"
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 80*batch_size,
+        }
+        
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=120)
+            resp.raise_for_status()
+            msg = resp.json()["choices"][0]["message"]
+            # 优先用content，否则用reasoning_content
+            content = (msg.get("content") or "").strip()
+            reasoning = (msg.get("reasoning_content") or "").strip()
             
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_msg}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 200,
-            }
-            
-            try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=60)
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
-                
-                # 解析 "分析：xxx\n情绪：xxx" 格式
-                found = None
-                analysis = ""
-                has_emotion_line = False
-                for line in content.strip().split("\n"):
-                    line = line.strip()
-                    if line.startswith("分析：") or line.startswith("分析:"):
-                        analysis = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    if line.startswith("情绪：") or line.startswith("情绪:"):
-                        has_emotion_line = True
-                        candidate = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                        # 精确匹配优先
-                        if candidate in EMOTIONS:
-                            found = candidate
-                        else:
-                            # 模糊匹配
-                            for emotion in EMOTIONS:
-                                if emotion in candidate:
-                                    found = emotion
-                                    break
-                
-                # 如果没有"情绪："行，在整个输出中找情绪词（排除分析行）
-                if not has_emotion_line:
+            # 先尝试从content解析编号格式
+            found_any = False
+            for line in content.split("\n"):
+                line = line.strip()
+                if not line or not line[0].isdigit():
+                    continue
+                parts = line.split(". ", 1)
+                if len(parts) < 2:
+                    continue
+                idx_str = parts[0].strip()
+                candidate = parts[1].strip()
+                if not idx_str.isdigit():
+                    continue
+                idx = int(idx_str) - 1
+                found = "平静"
+                if candidate in EMOTIONS:
+                    found = candidate
+                else:
                     for emotion in EMOTIONS:
-                        if emotion in content:
+                        if emotion in candidate:
                             found = emotion
                             break
-                
-                found = found or "平静"
-                results.append((text, found))
-                # 实时输出，方便监控质量
-                print(f"  [{len(results)}] {text[:25]:25s} → {found:4s} | {analysis[:30]}")
-                
-            except Exception as e:
-                print(f"  API 错误: {e}", file=sys.stderr)
-                results.append((text, "平静"))
-                time.sleep(2)
+                if 0 <= idx < len(batch):
+                    results.append((batch[idx], found))
+                    print(f"  [{len(results)}] {batch[idx][:30]:30s} → {found}", flush=True)
+                    found_any = True
             
-            time.sleep(0.3)  # 避免限流
+            # 如果content没解析到，从reasoning_content按行提取
+            if not found_any and reasoning:
+                for j, text in enumerate(batch):
+                    # 在推理内容中找第j条对应的情绪
+                    found = "平静"
+                    # 找"-> 情绪：xxx"或"→ xxx"模式
+                    for line in reasoning.split("\n"):
+                        if str(j+1) in line:
+                            for emotion in EMOTIONS:
+                                if emotion in line:
+                                    found = emotion
+                                    break
+                    results.append((text, found))
+                    print(f"  [{len(results)}] {text[:30]:30s} → {found}", flush=True)
+            
+        except Exception as e:
+            print(f"  API 错误: {e}", file=sys.stderr)
+            for text in batch:
+                results.append((text, "平静"))
         
-        print(f"  批次进度: {min(i+len(batch), len(texts))}/{len(texts)}")
+        print(f"  批次进度: {min(i+batch_size, len(texts))}/{len(texts)}", flush=True)
+        time.sleep(0.5)
     
     return results
 
@@ -167,6 +184,9 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
             outputs = model.generate(**inputs, max_new_tokens=80*batch_size, temperature=0.1)
         
         response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
+        
+        # 调试
+        print(f"\n--- LLM原始输出 ---\n{response[:500]}\n---", flush=True)
         
         # 解析批量输出
         for line in response.split("\n"):
@@ -210,7 +230,7 @@ def main():
     parser = argparse.ArgumentParser(description="LLM 情绪标注")
     parser.add_argument("--input", "-i", required=True, help="输入文本文件")
     parser.add_argument("--output", "-o", default="labeled.csv", help="输出CSV")
-    parser.add_argument("--provider", "-p", choices=["deepseek", "openai", "dashscope", "local"], default="deepseek")
+    parser.add_argument("--provider", "-p", choices=["deepseek", "openai", "dashscope", "longcat"], default="deepseek")
     parser.add_argument("--api-key", "-k", help="API Key")
     parser.add_argument("--model", "-m", help="模型名称（API或本地）")
     parser.add_argument("--batch-size", "-b", type=int, default=20, help="批大小")
