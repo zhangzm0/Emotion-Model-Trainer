@@ -125,7 +125,7 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
     
     return results
 
-def label_with_local(texts, model_name, batch_size=10):
+def label_with_local(texts, model_name, batch_size=10, output_file=None):
     """使用本地 GPU 模型标注（批量模式）"""
     import torch
     
@@ -181,7 +181,7 @@ def label_with_local(texts, model_name, batch_size=10):
                 if text in line or (j < len(batch) and str(j+1) in line):
                     results.append((text, found))
                     # 实时写入文件
-                    with open(args.output, "a", newline="", encoding="utf-8") as f:
+                    with open(output_file, "a", newline="", encoding="utf-8") as f:
                         csv.writer(f).writerow([text, found])
                     print(f"  [{len(results)}] {text[:25]:25s} → {found}", flush=True)
                     break
@@ -212,7 +212,7 @@ def main():
         csv.writer(f).writerow(["text", "label"])
     
     if args.provider == "local":
-        results = label_with_local(texts, args.model or "Qwen/Qwen2-7B-Instruct", args.batch_size)
+        results = label_with_local(texts, args.model or "Qwen/Qwen2-7B-Instruct", args.batch_size, args.output)
     else:
         if not args.api_key:
             print("错误：API 模式需要 --api-key", file=sys.stderr)
