@@ -154,7 +154,7 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
         
         # 构建批量提示：多条文本一起发送
         numbered = "\n".join([f"{j+1}. {t}" for j, t in enumerate(batch)])
-        user_msg = f"对以下文本逐条分析情绪，每行输出'分析：xxx 情绪：xxx'：\n{numbered}"
+        user_msg = f"对以下文本逐条选择情绪，每行输出'编号. 情绪'：\n{numbered}"
         
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -198,9 +198,11 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
                 results.append((batch[idx], found))
                 with open(output_file, "a", newline="", encoding="utf-8") as f:
                     csv.writer(f).writerow([batch[idx], found])
-                print(f"  [{len(results)}] {batch[idx][:25]:25s} → {found}", flush=True)
+                print(f"  [{len(results)}] {batch[idx][:30]:30s} → {found}", flush=True)
+            else:
+                print(f"  ⚠️ 编号{idx+1}超出范围, candidate={candidate}", flush=True)
         
-        print(f"  进度: {min(i+batch_size, len(texts))}/{len(texts)}", flush=True)
+        print(f"  批次进度: {min(i+batch_size, len(texts))}/{len(texts)} ({min(i+batch_size, len(texts))*100//len(texts)}%)", flush=True)
     
     return results
 
