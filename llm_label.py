@@ -164,16 +164,12 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
         
         response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
         
-        # 调试：打印原始输出
-        print(f"\n--- LLM原始输出 ---\n{response}\n--- 结束 ---\n", flush=True)
-        
         # 解析批量输出
         for line in response.split("\n"):
             line = line.strip()
             if not line:
                 continue
             # 提取编号和情绪
-            # 格式: "1. 分析：xxx 情绪：xxx"
             if not line[0].isdigit():
                 continue
             parts = line.split(". ", 1)
@@ -184,14 +180,24 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
             if not idx_str.isdigit():
                 continue
             idx = int(idx_str) - 1
-            # 找情绪
+            # 找情绪（可能多个，取第一个匹配的）
             found = "平静"
             if "情绪：" in rest or "情绪:" in rest:
                 candidate = rest.split("情绪：")[-1].split("情绪:")[-1].strip()
-                for emotion in EMOTIONS:
-                    if emotion in candidate:
-                        found = emotion
+                # 用顿号、逗号分割多个情绪，取第一个匹配的
+                for sep in ["、", "，", ",", " "]:
+                    if sep in candidate:
+                        candidate = candidate.split(sep)[0]
                         break
+                # 精确匹配
+                if candidate in EMOTIONS:
+                    found = candidate
+                else:
+                    # 模糊匹配
+                    for emotion in EMOTIONS:
+                        if emotion in candidate:
+                            found = emotion
+                            break
             # 匹配对应的文本
             if 0 <= idx < len(batch):
                 results.append((batch[idx], found))
