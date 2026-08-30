@@ -26,13 +26,17 @@ EMOTIONS = [
     "疑惑", "兴奋", "无奈", "担心", "惊讶", "哭泣", "心动", "难为情", "自信", "调皮", "平静"
 ]
 
-SYSTEM_PROMPT = """你是情绪分类专家。对每条中文短句，先分析情绪线索，再从以下19种情绪中选择最贴切的一个：
+SYSTEM_PROMPT = """你是情绪分类专家。对每条中文短句，从以下19种情绪中选择最贴切的一个：
 
 高兴、厌恶、害羞、害怕、生气、认真、紧张、慌张、疑惑、兴奋、无奈、担心、惊讶、哭泣、心动、难为情、自信、调皮、平静
 
-输出格式（每条一行，必须包含编号）：
-1. 分析：xxx 情绪：xxx
-2. 分析：xxx 情绪：xxx"""
+注意：只能从上面19个词中选一个，不能用其他词。
+
+输出格式（每条一行）：
+1. 高兴
+2. 厌恶
+3. 害羞
+..."""
 
 def label_with_api(texts, provider, api_key, model=None, batch_size=20):
     """使用 LLM API 标注"""
@@ -176,32 +180,22 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
             if len(parts) < 2:
                 continue
             idx_str = parts[0].strip()
-            rest = parts[1].strip()
+            candidate = parts[1].strip()
             if not idx_str.isdigit():
                 continue
             idx = int(idx_str) - 1
-            # 找情绪（可能多个，取第一个匹配的）
+            # 匹配情绪
             found = "平静"
-            if "情绪：" in rest or "情绪:" in rest:
-                candidate = rest.split("情绪：")[-1].split("情绪:")[-1].strip()
-                # 用顿号、逗号分割多个情绪，取第一个匹配的
-                for sep in ["、", "，", ",", " "]:
-                    if sep in candidate:
-                        candidate = candidate.split(sep)[0]
+            if candidate in EMOTIONS:
+                found = candidate
+            else:
+                for emotion in EMOTIONS:
+                    if emotion in candidate:
+                        found = emotion
                         break
-                # 精确匹配
-                if candidate in EMOTIONS:
-                    found = candidate
-                else:
-                    # 模糊匹配
-                    for emotion in EMOTIONS:
-                        if emotion in candidate:
-                            found = emotion
-                            break
             # 匹配对应的文本
             if 0 <= idx < len(batch):
                 results.append((batch[idx], found))
-                # 实时写入文件
                 with open(output_file, "a", newline="", encoding="utf-8") as f:
                     csv.writer(f).writerow([batch[idx], found])
                 print(f"  [{len(results)}] {batch[idx][:25]:25s} → {found}", flush=True)
