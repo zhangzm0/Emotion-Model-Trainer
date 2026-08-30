@@ -191,19 +191,6 @@ def label_with_local(texts, model_name, batch_size=10):
         print(f"  批次进度: {min(i+len(batch), len(texts))}/{len(texts)}")
     
     return results
-            
-            # 找到匹配的情绪
-            found = "平静"
-            for emotion in EMOTIONS:
-                if emotion in response:
-                    found = emotion
-                    break
-            
-            results.append((text, found))
-        
-        print(f"  进度: {min(i+batch_size, len(texts))}/{len(texts)}")
-    
-    return results
 
 def main():
     parser = argparse.ArgumentParser(description="LLM 情绪标注")
