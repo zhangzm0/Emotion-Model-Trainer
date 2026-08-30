@@ -180,6 +180,10 @@ def label_with_local(texts, model_name, batch_size=10):
             for j, text in enumerate(batch):
                 if text in line or (j < len(batch) and str(j+1) in line):
                     results.append((text, found))
+                    # 实时写入文件
+                    with open(args.output, "a", newline="", encoding="utf-8") as f:
+                        csv.writer(f).writerow([text, found])
+                    print(f"  [{len(results)}] {text[:25]:25s} → {found}")
                     break
         
         print(f"  进度: {min(i+batch_size, len(texts))}/{len(texts)}")
@@ -203,6 +207,10 @@ def main():
     
     print(f"读取 {len(texts)} 条文本")
     
+    # 初始化输出文件（写表头）
+    with open(args.output, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(["text", "label"])
+    
     if args.provider == "local":
         results = label_with_local(texts, args.model or "Qwen/Qwen2-7B-Instruct", args.batch_size)
     else:
@@ -211,12 +219,13 @@ def main():
             sys.exit(1)
         results = label_with_api(texts, args.provider, args.api_key, args.model, args.batch_size)
     
-    # 写入CSV
-    with open(args.output, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["text", "label"])
-        for text, label in results:
-            writer.writerow([text, label])
+    # API模式需要写入（本地模式已实时写入）
+    if args.provider != "local":
+        with open(args.output, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["text", "label"])
+            for text, label in results:
+                writer.writerow([text, label])
     
     print(f"\n标注完成！输出 {len(results)} 条到 {args.output}")
     
