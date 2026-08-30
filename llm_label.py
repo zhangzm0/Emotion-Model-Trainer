@@ -164,6 +164,9 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
         
         response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
         
+        # 调试：打印原始输出
+        print(f"\n--- LLM原始输出 ---\n{response}\n--- 结束 ---\n", flush=True)
+        
         # 解析批量输出
         for line in response.split("\n"):
             line = line.strip()
