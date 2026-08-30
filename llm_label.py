@@ -105,25 +105,30 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
                 # 解析 "分析：xxx\n情绪：xxx" 格式
                 found = None
                 analysis = ""
+                has_emotion_line = False
                 for line in content.strip().split("\n"):
                     line = line.strip()
                     if line.startswith("分析：") or line.startswith("分析:"):
                         analysis = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                     if line.startswith("情绪：") or line.startswith("情绪:"):
+                        has_emotion_line = True
                         candidate = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                        # 匹配19类情绪
-                        for emotion in EMOTIONS:
-                            if emotion in candidate:
-                                found = emotion
-                                break
-                        if not found and candidate in EMOTIONS:
+                        # 精确匹配优先
+                        if candidate in EMOTIONS:
                             found = candidate
-                    # 兼容直接输出情绪的情况
-                    if not found:
-                        for emotion in EMOTIONS:
-                            if emotion in line:
-                                found = emotion
-                                break
+                        else:
+                            # 模糊匹配
+                            for emotion in EMOTIONS:
+                                if emotion in candidate:
+                                    found = emotion
+                                    break
+                
+                # 如果没有"情绪："行，在整个输出中找情绪词（排除分析行）
+                if not has_emotion_line:
+                    for emotion in EMOTIONS:
+                        if emotion in content:
+                            found = emotion
+                            break
                 
                 found = found or "平静"
                 results.append((text, found))
@@ -173,16 +178,28 @@ def label_with_local(texts, model_name, batch_size=10):
             # 解析 "分析：xxx\n情绪：xxx" 格式
             found = "平静"
             analysis = ""
+            has_emotion_line = False
             for line in response.split("\n"):
                 line = line.strip()
                 if line.startswith("分析：") or line.startswith("分析:"):
                     analysis = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                 if line.startswith("情绪：") or line.startswith("情绪:"):
+                    has_emotion_line = True
                     candidate = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    for emotion in EMOTIONS:
-                        if emotion in candidate:
-                            found = emotion
-                            break
+                    if candidate in EMOTIONS:
+                        found = candidate
+                    else:
+                        for emotion in EMOTIONS:
+                            if emotion in candidate:
+                                found = emotion
+                                break
+            
+            # 如果没有"情绪："行，在整个输出中找情绪词
+            if not has_emotion_line:
+                for emotion in EMOTIONS:
+                    if emotion in response:
+                        found = emotion
+                        break
             
             results.append((text, found))
             # 实时输出，方便监控质量
