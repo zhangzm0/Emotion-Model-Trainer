@@ -148,10 +148,16 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
 
 def label_with_local(texts, model_name, batch_size=10):
     """使用本地 GPU 模型标注"""
-    from transformers import AutoTokenizer, AutoModelForCausalLM
     import torch
     
-    print(f"加载模型: {model_name}...")
+    # 优先用 ModelScope 下载（国内快）
+    try:
+        from modelscope import AutoTokenizer, AutoModelForCausalLM
+        print(f"通过 ModelScope 加载: {model_name}...")
+    except ImportError:
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        print(f"通过 HuggingFace 加载: {model_name}...")
+    
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.float16, device_map="auto", trust_remote_code=True
