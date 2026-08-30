@@ -183,10 +183,10 @@ def label_with_local(texts, model_name, batch_size=10):
                     # 实时写入文件
                     with open(args.output, "a", newline="", encoding="utf-8") as f:
                         csv.writer(f).writerow([text, found])
-                    print(f"  [{len(results)}] {text[:25]:25s} → {found}")
+                    print(f"  [{len(results)}] {text[:25]:25s} → {found}", flush=True)
                     break
         
-        print(f"  进度: {min(i+batch_size, len(texts))}/{len(texts)}")
+        print(f"  进度: {min(i+batch_size, len(texts))}/{len(texts)}", flush=True)
     
     return results
 
