@@ -26,24 +26,33 @@ EMOTIONS = [
     "疑惑", "兴奋", "无奈", "担心", "惊讶", "哭泣", "心动", "难为情", "自信", "调皮", "平静"
 ]
 
-SYSTEM_PROMPT = """你是一个情绪分类专家。给定一条中文短句，判断它表达的情绪类别。
+SYSTEM_PROMPT = """你是一个情绪分类专家。给定一条中文短句，先分析文本中的情绪线索，再从以下19种情绪中选择最贴切的一个：
 
-可选的情绪类别（共19种）：
 高兴、厌恶、害羞、害怕、生气、认真、紧张、慌张、疑惑、兴奋、无奈、担心、惊讶、哭泣、心动、难为情、自信、调皮、平静
 
 规则：
-1. 只从上述19个类别中选择最贴切的一个
-2. 如果一条文本包含多种情绪，选择最明显/主要的一个
-3. 如果无法判断，选择"平静"
-4. 只输出情绪名称，不要解释
+1. 先分析：找出文本中的关键词、语气、场景等情绪线索
+2. 再判断：从19个类别中选择最贴切的一个
+3. 如果一条文本包含多种情绪，选择最明显/主要的一个
+4. 如果无法判断，选择"平静"
+5. 只输出"分析"和"情绪"，不要其他内容
+
+输出格式（严格遵循）：
+分析：xxx
+情绪：xxx
 
 示例：
 输入：今天升职加薪了，太开心了！
-输出：高兴
+分析：关键词"升职加薪""太开心了"直接表达喜悦
+情绪：高兴
+
 输入：这只虫子太恶心了
-输出：厌恶
+分析："恶心"一词直接表达反感
+情绪：厌恶
+
 输入：他当着所有人表白，我脸都红了
-输出：害羞"""
+分析："当着所有人""脸红"表明害羞
+情绪：害羞"""
 
 def label_with_api(texts, provider, api_key, model=None, batch_size=20):
     """使用 LLM API 标注"""
@@ -74,54 +83,55 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i+batch_size]
         
-        # 构建批量提示
-        numbered = "\n".join([f"{j+1}. {t}" for j, t in enumerate(batch)])
-        user_msg = f"请对以下文本进行情绪分类，每行输出编号+情绪名称：\n{numbered}"
-        
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 500,
-        }
-        
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=60)
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
+        # 逐条发送（带思考的逐条分析更准确）
+        for j, text in enumerate(batch):
+            user_msg = f"输入：{text}\n输出："
             
-            # 解析输出
-            for line in content.strip().split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                # 格式: "1. 高兴" 或 "高兴"
-                parts = line.split(". ", 1) if ". " in line else [None, line]
-                text_part = parts[-1].strip()
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 200,
+            }
+            
+            try:
+                resp = requests.post(url, headers=headers, json=payload, timeout=60)
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"]
                 
-                # 找到匹配的情绪
+                # 解析 "分析：xxx\n情绪：xxx" 格式
                 found = None
-                for emotion in EMOTIONS:
-                    if emotion in text_part:
-                        found = emotion
-                        break
+                for line in content.strip().split("\n"):
+                    line = line.strip()
+                    if line.startswith("情绪：") or line.startswith("情绪:"):
+                        candidate = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        # 匹配19类情绪
+                        for emotion in EMOTIONS:
+                            if emotion in candidate:
+                                found = emotion
+                                break
+                        if not found and candidate in EMOTIONS:
+                            found = candidate
+                    # 兼容直接输出情绪的情况
+                    if not found:
+                        for emotion in EMOTIONS:
+                            if emotion in line:
+                                found = emotion
+                                break
                 
-                if found:
-                    idx = len(results) - len(batch) + int(parts[0].rstrip(".")) - 1 if parts[0] else len(results)
-                    if 0 <= idx < len(batch):
-                        results.append((batch[idx % len(batch)], found))
+                results.append((text, found or "平静"))
+                
+            except Exception as e:
+                print(f"  API 错误: {e}", file=sys.stderr)
+                results.append((text, "平静"))
+                time.sleep(2)
             
-        except Exception as e:
-            print(f"  API 错误: {e}", file=sys.stderr)
-            time.sleep(2)
+            time.sleep(0.3)  # 避免限流
         
-        if (i // batch_size) % 5 == 0:
-            print(f"  进度: {min(i+batch_size, len(texts))}/{len(texts)}")
-        
-        time.sleep(0.5)  # 避免限流
+        print(f"  进度: {min(i+len(batch), len(texts))}/{len(texts)}")
     
     return results
 
@@ -150,9 +160,26 @@ def label_with_local(texts, model_name, batch_size=10):
             inputs = tokenizer(input_text, return_tensors="pt").to(model.device)
             
             with torch.no_grad():
-                outputs = model.generate(**inputs, max_new_tokens=10, temperature=0.1)
+                outputs = model.generate(**inputs, max_new_tokens=200, temperature=0.1)
             
             response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
+            
+            # 解析 "分析：xxx\n情绪：xxx" 格式
+            found = "平静"
+            for line in response.split("\n"):
+                line = line.strip()
+                if line.startswith("情绪：") or line.startswith("情绪:"):
+                    candidate = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    for emotion in EMOTIONS:
+                        if emotion in candidate:
+                            found = emotion
+                            break
+            
+            results.append((text, found))
+        
+        print(f"  进度: {min(i+len(batch), len(texts))}/{len(texts)}")
+    
+    return results
             
             # 找到匹配的情绪
             found = "平静"
