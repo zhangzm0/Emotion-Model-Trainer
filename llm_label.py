@@ -202,7 +202,6 @@ def label_with_local(texts, model_name, batch_size=10):
                         break
             
             results.append((text, found))
-            # 实时输出，方便监控质量
             print(f"  [{len(results)}] {text[:25]:25s} → {found:4s} | {analysis[:30]}")
         
         print(f"  批次进度: {min(i+len(batch), len(texts))}/{len(texts)}")
