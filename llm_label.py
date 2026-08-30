@@ -30,8 +30,9 @@ SYSTEM_PROMPT = """你是情绪分类专家。对每条中文短句，先分析�
 
 高兴、厌恶、害羞、害怕、生气、认真、紧张、慌张、疑惑、兴奋、无奈、担心、惊讶、哭泣、心动、难为情、自信、调皮、平静
 
-输出格式（每条一行）：
-分析：xxx 情绪：xxx"""
+输出格式（每条一行，必须包含编号）：
+1. 分析：xxx 情绪：xxx
+2. 分析：xxx 情绪：xxx"""
 
 def label_with_api(texts, provider, api_key, model=None, batch_size=20):
     """使用 LLM API 标注"""
@@ -168,23 +169,33 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
             line = line.strip()
             if not line:
                 continue
+            # 提取编号和情绪
+            # 格式: "1. 分析：xxx 情绪：xxx"
+            if not line[0].isdigit():
+                continue
+            parts = line.split(". ", 1)
+            if len(parts) < 2:
+                continue
+            idx_str = parts[0].strip()
+            rest = parts[1].strip()
+            if not idx_str.isdigit():
+                continue
+            idx = int(idx_str) - 1
             # 找情绪
             found = "平静"
-            if "情绪：" in line or "情绪:" in line:
-                candidate = line.split("情绪：")[-1].split("情绪:")[-1].strip()
+            if "情绪：" in rest or "情绪:" in rest:
+                candidate = rest.split("情绪：")[-1].split("情绪:")[-1].strip()
                 for emotion in EMOTIONS:
                     if emotion in candidate:
                         found = emotion
                         break
             # 匹配对应的文本
-            for j, text in enumerate(batch):
-                if text in line or (j < len(batch) and str(j+1) in line):
-                    results.append((text, found))
-                    # 实时写入文件
-                    with open(output_file, "a", newline="", encoding="utf-8") as f:
-                        csv.writer(f).writerow([text, found])
-                    print(f"  [{len(results)}] {text[:25]:25s} → {found}", flush=True)
-                    break
+            if 0 <= idx < len(batch):
+                results.append((batch[idx], found))
+                # 实时写入文件
+                with open(output_file, "a", newline="", encoding="utf-8") as f:
+                    csv.writer(f).writerow([batch[idx], found])
+                print(f"  [{len(results)}] {batch[idx][:25]:25s} → {found}", flush=True)
         
         print(f"  进度: {min(i+batch_size, len(texts))}/{len(texts)}", flush=True)
     
