@@ -149,7 +149,7 @@ def label_with_local(texts, model_name, batch_size=10):
         
         # 构建批量提示：多条文本一起发送
         numbered = "\n".join([f"{j+1}. {t}" for j, t in enumerate(batch)])
-        user_msg = f"对以下文本逐条分析情绪，每行输出"分析：xxx 情绪：xxx"：\n{numbered}"
+        user_msg = f"对以下文本逐条分析情绪，每行输出'分析：xxx 情绪：xxx'：\n{numbered}"
         
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
