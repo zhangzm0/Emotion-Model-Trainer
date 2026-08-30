@@ -26,33 +26,12 @@ EMOTIONS = [
     "疑惑", "兴奋", "无奈", "担心", "惊讶", "哭泣", "心动", "难为情", "自信", "调皮", "平静"
 ]
 
-SYSTEM_PROMPT = """你是一个情绪分类专家。给定一条中文短句，先分析文本中的情绪线索，再从以下19种情绪中选择最贴切的一个：
+SYSTEM_PROMPT = """你是情绪分类专家。对每条中文短句，先分析情绪线索，再从以下19种情绪中选择最贴切的一个：
 
 高兴、厌恶、害羞、害怕、生气、认真、紧张、慌张、疑惑、兴奋、无奈、担心、惊讶、哭泣、心动、难为情、自信、调皮、平静
 
-规则：
-1. 先分析：找出文本中的关键词、语气、场景等情绪线索
-2. 再判断：从19个类别中选择最贴切的一个
-3. 如果一条文本包含多种情绪，选择最明显/主要的一个
-4. 如果无法判断，选择"平静"
-5. 只输出"分析"和"情绪"，不要其他内容
-
-输出格式（严格遵循）：
-分析：xxx
-情绪：xxx
-
-示例：
-输入：今天升职加薪了，太开心了！
-分析：关键词"升职加薪""太开心了"直接表达喜悦
-情绪：高兴
-
-输入：这只虫子太恶心了
-分析："恶心"一词直接表达反感
-情绪：厌恶
-
-输入：他当着所有人表白，我脸都红了
-分析："当着所有人""脸红"表明害羞
-情绪：害羞"""
+输出格式（每条一行）：
+分析：xxx 情绪：xxx"""
 
 def label_with_api(texts, provider, api_key, model=None, batch_size=20):
     """使用 LLM API 标注"""
@@ -147,7 +126,7 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
     return results
 
 def label_with_local(texts, model_name, batch_size=10):
-    """使用本地 GPU 模型标注"""
+    """使用本地 GPU 模型标注（批量模式）"""
     import torch
     
     # 优先用 ModelScope 下载（国内快）
@@ -168,49 +147,42 @@ def label_with_local(texts, model_name, batch_size=10):
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i+batch_size]
         
-        for text in batch:
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"输入：{text}\n输出："}
-            ]
-            input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            inputs = tokenizer(input_text, return_tensors="pt").to(model.device)
-            
-            with torch.no_grad():
-                outputs = model.generate(**inputs, max_new_tokens=200, temperature=0.1)
-            
-            response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
-            
-            # 解析 "分析：xxx\n情绪：xxx" 格式
+        # 构建批量提示：多条文本一起发送
+        numbered = "\n".join([f"{j+1}. {t}" for j, t in enumerate(batch)])
+        user_msg = f"对以下文本逐条分析情绪，每行输出"分析：xxx 情绪：xxx"：\n{numbered}"
+        
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg}
+        ]
+        input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tokenizer(input_text, return_tensors="pt").to(model.device)
+        
+        with torch.no_grad():
+            outputs = model.generate(**inputs, max_tokens=80*batch_size, temperature=0.1)
+        
+        response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
+        
+        # 解析批量输出
+        for line in response.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            # 找情绪
             found = "平静"
-            analysis = ""
-            has_emotion_line = False
-            for line in response.split("\n"):
-                line = line.strip()
-                if line.startswith("分析：") or line.startswith("分析:"):
-                    analysis = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                if line.startswith("情绪：") or line.startswith("情绪:"):
-                    has_emotion_line = True
-                    candidate = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    if candidate in EMOTIONS:
-                        found = candidate
-                    else:
-                        for emotion in EMOTIONS:
-                            if emotion in candidate:
-                                found = emotion
-                                break
-            
-            # 如果没有"情绪："行，在整个输出中找情绪词
-            if not has_emotion_line:
+            if "情绪：" in line or "情绪:" in line:
+                candidate = line.split("情绪：")[-1].split("情绪:")[-1].strip()
                 for emotion in EMOTIONS:
-                    if emotion in response:
+                    if emotion in candidate:
                         found = emotion
                         break
-            
-            results.append((text, found))
-            print(f"  [{len(results)}] {text[:25]:25s} → {found:4s} | {analysis[:30]}")
+            # 匹配对应的文本
+            for j, text in enumerate(batch):
+                if text in line or (j < len(batch) and str(j+1) in line):
+                    results.append((text, found))
+                    break
         
-        print(f"  批次进度: {min(i+len(batch), len(texts))}/{len(texts)}")
+        print(f"  进度: {min(i+batch_size, len(texts))}/{len(texts)}")
     
     return results
 
