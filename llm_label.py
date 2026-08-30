@@ -104,8 +104,11 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
                 
                 # 解析 "分析：xxx\n情绪：xxx" 格式
                 found = None
+                analysis = ""
                 for line in content.strip().split("\n"):
                     line = line.strip()
+                    if line.startswith("分析：") or line.startswith("分析:"):
+                        analysis = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                     if line.startswith("情绪：") or line.startswith("情绪:"):
                         candidate = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                         # 匹配19类情绪
@@ -122,7 +125,10 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
                                 found = emotion
                                 break
                 
-                results.append((text, found or "平静"))
+                found = found or "平静"
+                results.append((text, found))
+                # 实时输出，方便监控质量
+                print(f"  [{len(results)}] {text[:25]:25s} → {found:4s} | {analysis[:30]}")
                 
             except Exception as e:
                 print(f"  API 错误: {e}", file=sys.stderr)
@@ -131,7 +137,7 @@ def label_with_api(texts, provider, api_key, model=None, batch_size=20):
             
             time.sleep(0.3)  # 避免限流
         
-        print(f"  进度: {min(i+len(batch), len(texts))}/{len(texts)}")
+        print(f"  批次进度: {min(i+len(batch), len(texts))}/{len(texts)}")
     
     return results
 
@@ -166,8 +172,11 @@ def label_with_local(texts, model_name, batch_size=10):
             
             # 解析 "分析：xxx\n情绪：xxx" 格式
             found = "平静"
+            analysis = ""
             for line in response.split("\n"):
                 line = line.strip()
+                if line.startswith("分析：") or line.startswith("分析:"):
+                    analysis = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                 if line.startswith("情绪：") or line.startswith("情绪:"):
                     candidate = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                     for emotion in EMOTIONS:
@@ -176,8 +185,10 @@ def label_with_local(texts, model_name, batch_size=10):
                             break
             
             results.append((text, found))
+            # 实时输出，方便监控质量
+            print(f"  [{len(results)}] {text[:25]:25s} → {found:4s} | {analysis[:30]}")
         
-        print(f"  进度: {min(i+len(batch), len(texts))}/{len(texts)}")
+        print(f"  批次进度: {min(i+len(batch), len(texts))}/{len(texts)}")
     
     return results
             
