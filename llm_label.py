@@ -181,7 +181,7 @@ def label_with_local(texts, model_name, batch_size=10, output_file=None):
         inputs = tokenizer(input_text, return_tensors="pt").to(model.device)
         
         with torch.no_grad():
-            outputs = model.generate(**inputs, max_new_tokens=80*batch_size, temperature=0.1)
+            outputs = model.generate(**inputs, max_new_tokens=80*batch_size, temperature=0.1, enable_thinking=False)
         
         response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
         
